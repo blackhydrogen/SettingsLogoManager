@@ -1,0 +1,344 @@
+<html>
+	<head>
+		<title>Session {{sessionId}}</title>
+		<style>
+		ul {
+			padding: 0px;
+		}
+		li {
+			padding: 10px;
+			min-height: 150px;
+			border: 1px solid #000000;
+			float: left;
+			display: inline;
+			width: 30%;
+			background: #FFFFFF;
+		}
+		span, input, form {
+			margin: 5px;
+		}
+		
+		div.settings {
+			border: 1px solid black;
+			padding-left: 10px;
+			padding-right: 10px;
+		}
+		</style>
+	</head>
+	<body>
+		<h2>Output</h2>
+		<input type="button" value="View Video" id="viewVideoButton">
+			
+		<h2>Settings</h2>
+		<div class="settings" style="background: #4BE6E6">
+		Algorithm: 
+		<select id="algorithmSelection">
+			<option value="SIFT & HOG">SIFT & HOG</option>
+			<option value="SIFT">SIFT</option>
+			<option value="HOG">HOG</option>
+		</select>
+		<input type="button" value="Go" id="selectAlgorithmButton">
+		Current Status:<span id="currentAlgorithm">SIFT & HOG</span>
+		</div>
+		
+		<div class="settings" style="background: #B6FF99">
+		Drawing of Result-Rectangles:
+		<input type="button" value="Deactivate" id="setDrawRectanglesButton">
+		Current Status:<span id="currentDrawRectangles">Active</span>
+		</div>
+		
+		<div class="settings" style="background: #B6FF99">
+		Non-maximum Suppression (SIFT):
+		<input type="button" value="Deactivate" id="setNMSButton">
+		Current Status:<span id="currentNMS">Active</span>
+		</div>
+		
+		<div class="settings" style="background: #B6FF99">
+		Non-maximum Suppression (HOG):
+		<input type="button" value="Deactivate" id="setNMSHOGButton">
+		Current Status:<span id="currentNMSHOG">Active</span>
+		</div>
+		
+		<h2>Logo Manager</h2>
+		<form method="post" enctype="multipart/form-data" action="/upload/{{sessionId}}">
+			<label>Upload Logos: <input type="file" name="logos" accept="image/*" multiple></label>
+			<br>
+			<input type="submit">
+		</form>
+		
+		<input type="button" value="Add Default Logos" id="addDefaultButton">
+		<input type="button" value="Delete All Logos" id="deleteAllButton">
+		
+		<ul id="logoList">
+		</ul>
+		
+		<script src="/socket.io/socket.io.js"></script>
+		<script src="/static/scripts/jquery-1.11.3.min.js"></script>
+		<script>
+			var socket = io();
+			var logos = {};
+			
+			socket.emit("registerWithId", {id: "{{sessionId}}"});
+			
+			function addLogo(data) {				
+				$.each(data, function(name) {
+					// Copy the entire data[name] object into logos[name]
+					logos[name] = data[name];
+					
+					// Create the HTML element
+					logos[name].htmlElement = $("<li>")
+					.append("<span>")
+					.append("<br>")
+					.append(
+						$("<input>")
+						.prop("type", "button")
+						.prop("value", "Delete")
+					)
+					.append(
+						$("<input>")
+						.prop("type", "button")
+						.prop("value", "Mute")
+					)
+					.append(
+						$("<input>")
+						.prop("type", "button")
+						.prop("value", "Update URL")
+					)
+					.append("<br>")
+					.append(
+						$("<input>")
+						.prop("type", "text")
+						.prop("placeholder", "Enter URL Here")
+						.css("width", "100%")
+					)
+					.append("<br>")
+					.append(
+						$("<img>")
+						.prop("src", logos[name].url)
+						.css("max-height", 100)
+						.css("max-width", "90%")
+					)
+					.on("click", ":button", {name: name}, buttonClick);
+					
+					updateStatusAndAppearance(name);
+					
+					$("#logoList").append(logos[name].htmlElement);
+				});
+			}
+			
+			function updateLogo(data) {
+				$.each(data, function(name) {
+					// Copy the status from data to logos
+					if(logos[name] == undefined) {
+						console.warn("Unloaded logo");
+						return;
+					}
+					logos[name].status = data[name].status;
+					
+					updateStatusAndAppearance(name);
+					
+					if(data[name].status == "Deleted") {
+						setTimeout(function() {
+							logos[name].htmlElement.remove();
+							delete logos[name];
+						}, 5000);
+					}
+				});
+			}
+			
+			function updateStatusAndAppearance(name) {
+				var status = logos[name].status;
+				var htmlElement = logos[name].htmlElement;
+				
+				htmlElement.children("span").html("Status: " + status);
+				
+				if(status == "Deleted") {
+					htmlElement.css("background", "#CCCCCC");
+					htmlElement.children("input").prop("disabled", true);
+				}
+				else if(status == "Muted") {
+					htmlElement.css("background", "#FFC3CE");
+					htmlElement.children("input").prop("disabled", false);
+					htmlElement.children("input").eq(1).prop("value", "Unmute");
+				}
+				else if(status == "Loaded") {
+					htmlElement.css("background", "#B6FF99");
+					htmlElement.children("input").prop("disabled", false);
+					htmlElement.children("input").eq(1).prop("value", "Mute");
+				}
+				else {
+					htmlElement.css("background", "#FFDB99");
+					htmlElement.children("input").prop("disabled", true);
+				}
+			}
+			
+			function buttonClick(event) {
+				var action = event.currentTarget.value;
+				var name = event.data.name;
+				logos[name].htmlElement.children("input").prop("disabled", true);
+				logos[name].htmlElement.css("background", "#FFDB99");
+				
+				if(action == "Delete") {
+					logos[name].htmlElement.children("span").html("Status: Deleting");
+				}
+				else if(action == "Mute") {
+					logos[name].htmlElement.children("span").html("Status: Muting");
+				}
+				else if(action == "Unmute") {
+					logos[name].htmlElement.children("span").html("Status: Unmuting");
+				}
+				
+				var data = {
+					command: action.toLowerCase(),
+					name: name
+				};
+				
+				socket.emit("updateRequest", data);
+			}
+			
+			socket.on("add_{{sessionId}}", function(data) {
+				addLogo(data);
+			});
+			
+			socket.on("updateReply_{{sessionId}}", function(data) {
+				updateLogo(data);
+			});
+			
+			$("#addDefaultButton").on("click", function() {
+				$.getJSON("/loadDefaultLogos/{{sessionId}}", addLogo);
+			});
+			
+			$("#deleteAllButton").on("click", function() {
+				$.each(logos, function(name) {
+					if(!logos[name].htmlElement.children("input").eq(0).prop("disabled"))
+						logos[name].htmlElement.children("input").eq(0).click();
+				});
+			});
+			
+			// Settings
+			
+			$("#selectAlgorithmButton").on("click", function() {
+				var selectedAlgorithm = $("#algorithmSelection").val();
+				
+				$("#selectAlgorithmButton").prop("disabled", true);
+				$("#selectAlgorithmButton").parent().css("background", "#FFDB99");
+				$("#algorithmSelection").prop("disabled", true);
+				$("#currentAlgorithm").html("Setting to " + selectedAlgorithm);
+				
+				var data = {
+					command: "setAlgorithm",
+					sift: true,
+					hog: true
+				};
+				
+				if(selectedAlgorithm == "HOG")
+					data.sift = false;
+				else if(selectedAlgorithm == "SIFT")
+					data.hog = false;
+					
+				socket.emit("settingsRequest", data);
+			});
+			
+			$("#setDrawRectanglesButton").on("click", function() {
+				var draw = $("#setDrawRectanglesButton").val() == "Activate";
+				
+				$("#setDrawRectanglesButton").prop("disabled", true);
+				$("#setDrawRectanglesButton").parent().css("background", "#FFDB99");
+				if(draw)
+					$("#currentDrawRectangles").html("Activating");
+				else
+					$("#currentDrawRectangles").html("Deactivating");
+				
+				var data = {
+					command: "setDrawRectangles",
+					draw: draw
+				};
+					
+				socket.emit("settingsRequest", data);
+			});
+			
+			$("#setNMSButton").on("click", function() {
+				var nms = $("#setNMSButton").val() == "Activate";
+				
+				$("#setNMSButton").prop("disabled", true);
+				$("#setNMSButton").parent().css("background", "#FFDB99");
+				if(nms)
+					$("#currentNMS").html("Activating");
+				else
+					$("#currentNMS").html("Deactivating");
+				
+				var data = {
+					command: "setNMS",
+					nms: nms
+				};
+					
+				socket.emit("settingsRequest", data);
+			});
+			
+			socket.on("settingsReply_{{sessionId}}", function(data) {
+				console.log(data);
+				if(data.command == "setAlgorithm")
+					updateSetAlgorithm(data);
+				else if(data.command == "setDrawRectangles")
+					updateSetDrawRectangles(data);
+				else if(data.command == "setNMS")
+					updateSetNMS(data);
+			});
+			
+			function updateSetAlgorithm(data) {
+				if(data.hog && data.sift) {
+					$("#currentAlgorithm").html("SIFT & HOG");
+					$("#selectAlgorithmButton").parent().css("background", "#4BE6E6");
+				}
+				else if(data.hog) {
+					$("#currentAlgorithm").html("HOG");
+					$("#selectAlgorithmButton").parent().css("background", "#7CC8FF");
+				}
+				else if(data.sift) {
+					$("#currentAlgorithm").html("SIFT");
+					$("#selectAlgorithmButton").parent().css("background", "#B6FF99");
+				}
+					
+				$("#selectAlgorithmButton").prop("disabled", false);
+				$("#algorithmSelection").prop("disabled", false);
+			}
+			
+			function updateSetDrawRectangles(data) {				
+				if(data.draw) {
+					$("#currentDrawRectangles").html("Active");
+					$("#setDrawRectanglesButton").val("Deactivate");
+					$("#setDrawRectanglesButton").parent().css("background", "#B6FF99");
+				}
+				else {
+					$("#currentDrawRectangles").html("Inactive");
+					$("#setDrawRectanglesButton").val("Activate");
+					$("#setDrawRectanglesButton").parent().css("background", "#FFC3CE");
+				}
+				
+				$("#setDrawRectanglesButton").prop("disabled", false);
+			}
+			
+			function updateSetNMS(data) {				
+				if(data.nms) {
+					$("#currentNMS").html("Active");
+					$("#setNMSButton").val("Deactivate");
+					$("#setNMSButton").parent().css("background", "#B6FF99");
+				}
+				else {
+					$("#currentNMS").html("Inactive");
+					$("#setNMSButton").val("Activate");
+					$("#setNMSButton").parent().css("background", "#FFC3CE");
+				}
+				
+				$("#setNMSButton").prop("disabled", false);
+			}
+			
+			// Output
+			
+			$("#viewVideoButton").on("click", function() {
+				window.open("/static/vid.html", "videoWindow", "width=640, height=480, menubar=no, location=no")
+			});
+			
+		</script>
+	</body>
+</html>
