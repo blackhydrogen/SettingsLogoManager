@@ -49,8 +49,8 @@
 		
 		<div class="settings" style="background: #B6FF99">
 		Non-maximum Suppression (SIFT):
-		<input type="button" value="Deactivate" id="setNMSButton">
-		Current Status:<span id="currentNMS">Active</span>
+		<input type="button" value="Deactivate" id="setNMSSIFTButton">
+		Current Status:<span id="currentNMSSIFT">Active</span>
 		</div>
 		
 		<div class="settings" style="background: #B6FF99">
@@ -66,7 +66,7 @@
 			<input type="submit">
 		</form>
 		
-		<input type="button" value="Add Default Logos" id="addDefaultButton">
+		<!--<input type="button" value="Add Default Logos" id="addDefaultButton">-->
 		<input type="button" value="Delete All Logos" id="deleteAllButton">
 		
 		<ul id="logoList">
@@ -146,7 +146,7 @@
 				});
 			}
 			
-			function updateStatusAndAppearance(name) {
+			function updateStatusAndAppearance(name) { //note that URL is handled seperately
 				var status = logos[name].status;
 				var htmlElement = logos[name].htmlElement;
 				
@@ -178,7 +178,21 @@
 				logos[name].htmlElement.children("input").prop("disabled", true);
 				logos[name].htmlElement.css("background", "#FFDB99");
 				
-				if(action == "Delete") {
+				var data = {
+					command: action.toLowerCase(),
+					name: name
+				};
+				
+				if(action == "Update URL") { //special action
+					data.command = "updateUrl";
+					data.url = logos[name].htmlElement.children("input:text").val() || "#";
+					
+					logos[name].htmlElement.children("span").html("Status: Updating URL");
+					
+					socket.emit("updateUrlRequest", data);
+					return;
+				}
+				else if(action == "Delete") {
 					logos[name].htmlElement.children("span").html("Status: Deleting");
 				}
 				else if(action == "Mute") {
@@ -187,11 +201,6 @@
 				else if(action == "Unmute") {
 					logos[name].htmlElement.children("span").html("Status: Unmuting");
 				}
-				
-				var data = {
-					command: action.toLowerCase(),
-					name: name
-				};
 				
 				socket.emit("updateRequest", data);
 			}
@@ -204,9 +213,20 @@
 				updateLogo(data);
 			});
 			
-			$("#addDefaultButton").on("click", function() {
-				$.getJSON("/loadDefaultLogos/{{sessionId}}", addLogo);
+			socket.on("updateUrlReply", function(data) {
+				if(logos[data.name] == undefined) {
+					console.warn("Unloaded logo");
+					return;
+				}
+				
+				logos[data.name].htmlElement.children("input:text").val(data.url);
+				
+				updateStatusAndAppearance(data.name);
 			});
+			
+			//$("#addDefaultButton").on("click", function() {
+			//	$.getJSON("/loadDefaultLogos/{{sessionId}}", addLogo);
+			//});
 			
 			$("#deleteAllButton").on("click", function() {
 				$.each(logos, function(name) {
@@ -257,18 +277,36 @@
 				socket.emit("settingsRequest", data);
 			});
 			
-			$("#setNMSButton").on("click", function() {
-				var nms = $("#setNMSButton").val() == "Activate";
+			$("#setNMSSIFTButton").on("click", function() {
+				var nms = $("#setNMSSIFTButton").val() == "Activate";
 				
-				$("#setNMSButton").prop("disabled", true);
-				$("#setNMSButton").parent().css("background", "#FFDB99");
+				$("#setNMSSIFTButton").prop("disabled", true);
+				$("#setNMSSIFTButton").parent().css("background", "#FFDB99");
 				if(nms)
-					$("#currentNMS").html("Activating");
+					$("#currentNMSSIFT").html("Activating");
 				else
-					$("#currentNMS").html("Deactivating");
+					$("#currentNMSSIFT").html("Deactivating");
 				
 				var data = {
-					command: "setNMS",
+					command: "setNMSSIFT",
+					nms: nms
+				};
+					
+				socket.emit("settingsRequest", data);
+			});
+			
+			$("#setNMSHOGButton").on("click", function() {
+				var nms = $("#setNMSHOGButton").val() == "Activate";
+				
+				$("#setNMSHOGButton").prop("disabled", true);
+				$("#setNMSHOGButton").parent().css("background", "#FFDB99");
+				if(nms)
+					$("#currentNMSHOG").html("Activating");
+				else
+					$("#currentNMSHOG").html("Deactivating");
+				
+				var data = {
+					command: "setNMSHOG",
 					nms: nms
 				};
 					
@@ -281,8 +319,10 @@
 					updateSetAlgorithm(data);
 				else if(data.command == "setDrawRectangles")
 					updateSetDrawRectangles(data);
-				else if(data.command == "setNMS")
-					updateSetNMS(data);
+				else if(data.command == "setNMSSIFT")
+					updateSetNMSSIFT(data);
+				else if(data.command == "setNMSHOG")
+					updateSetNMSHOG(data);
 			});
 			
 			function updateSetAlgorithm(data) {
@@ -318,19 +358,34 @@
 				$("#setDrawRectanglesButton").prop("disabled", false);
 			}
 			
-			function updateSetNMS(data) {				
+			function updateSetNMSSIFT(data) {				
 				if(data.nms) {
-					$("#currentNMS").html("Active");
-					$("#setNMSButton").val("Deactivate");
-					$("#setNMSButton").parent().css("background", "#B6FF99");
+					$("#currentNMSSIFT").html("Active");
+					$("#setNMSSIFTButton").val("Deactivate");
+					$("#setNMSSIFTButton").parent().css("background", "#B6FF99");
 				}
 				else {
-					$("#currentNMS").html("Inactive");
-					$("#setNMSButton").val("Activate");
-					$("#setNMSButton").parent().css("background", "#FFC3CE");
+					$("#currentNMSSIFT").html("Inactive");
+					$("#setNMSSIFTButton").val("Activate");
+					$("#setNMSSIFTButton").parent().css("background", "#FFC3CE");
 				}
 				
-				$("#setNMSButton").prop("disabled", false);
+				$("#setNMSSIFTButton").prop("disabled", false);
+			}
+			
+			function updateSetNMSHOG(data) {				
+				if(data.nms) {
+					$("#currentNMSHOG").html("Active");
+					$("#setNMSHOGButton").val("Deactivate");
+					$("#setNMSHOGButton").parent().css("background", "#B6FF99");
+				}
+				else {
+					$("#currentNMSHOG").html("Inactive");
+					$("#setNMSHOGButton").val("Activate");
+					$("#setNMSHOGButton").parent().css("background", "#FFC3CE");
+				}
+				
+				$("#setNMSHOGButton").prop("disabled", false);
 			}
 			
 			// Output

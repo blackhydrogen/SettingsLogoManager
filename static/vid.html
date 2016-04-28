@@ -81,7 +81,7 @@ function updateLinks() {
 	
 	removeLinks(currentTime, textLayer);
 	drawLinks(currentTime, textLayer);
-	setTimeout(updateLinks, 100);
+	setTimeout(updateLinks, 200);
 }
 
 function removeLinks(currentTime, textLayer)  {
@@ -115,6 +115,7 @@ function drawLinks(currentTime, textLayer) {
 
 
 socket.on("addResultRects", function(data) {
+	// console.log(new Date().getTime());
 	for(var i = 0; i < data.length; i++) {
 		console.log("Adding ", data[i]);
 		

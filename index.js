@@ -18,6 +18,8 @@ app.use('/static', express.static('static'));
 var addUnMuteDeleteCounter = 0;
 var settingsCounter = {};
 
+var cachedLogoUrlSettings = {};
+
 redisClient.on("error", function (err) {
     console.log("Error " + err);
 });
@@ -26,7 +28,12 @@ io.on('connection', function (socket) {
 	socket.on('registerWithId', handleSocketRegistration);
 	socket.on('updateRequest', handleUpdateRequest);
 	socket.on('settingsRequest', handleSettingsRequest);
-	socket.on('registerResultsVideo', readResultRects);
+	socket.on('updateUrlRequest', handleUpdateUrlRequest);
+	socket.on('registerResultsVideo', handleRegisterResultsVideo);
+});
+
+app.get('/', function(req, res) {
+	res.redirect("/session/1");
 });
 
 app.get('/session/:id', function (req, res) {
@@ -40,43 +47,6 @@ app.get('/session/:id', function (req, res) {
 		});
 	}
 });
-
-// app.get('/loadDefaultLogos/:id', function(req, res) {
-	// var id = searchForId(req.params.id);
-	// if(id == null) {
-		// res.sendStatus(404);
-	// }
-	// else {		
-		// fs.readdir(__dirname + "/default_logos/", function(err, files) {
-			// var data = {};
-			// var redisMultiCommand = redisClient.multi();
-			// if(files) {
-				// for(var i = 0; i < files.length; i++) {
-					// var newName = uniqueNameGenerator(__dirname + "/session_files/" + id + "/logo_images/", files[i]);
-					
-					// fs.copySync(
-						// __dirname + "/default_logos/" + files[i],
-						// __dirname + "/session_files/" + id + "/logo_images/" + newName
-					// );
-					
-					// data[newName] = {
-						// url: "/session_files/" + id + "/logo_images/" + newName,
-						// status: "Loading"
-					// }
-					
-					// var json = {
-						// command: "add",
-						// name: newName,
-					// }
-					
-					// redisMultiCommand.rpush("nodeToStorm", JSON.stringify(json));	
-				// }
-			// }
-			// res.json(data);
-			// redisMultiCommand.exec();
-		// });
-	// }
-// });
 
 app.post('/upload/:id', upload.array('logos'), function(req, res) {
 	var id = searchForId(req.params.id);
@@ -123,35 +93,6 @@ var server = http.listen(3000, function () {
   console.log('Listening at http://%s:%s', host, port);
 });
 
-// ===== Routes for Storm =====
-
-// app.post('/confirmAdd/:id/:logoId', function (req, res) {
-	// var id = searchForId(req.params.id);
-	// if(id == null) {
-		// res.sendStatus(404);
-	// }
-	// else {
-		// var logoName = req.params.logoId;
-		// var obj = {};
-		// obj[logoName] = {status: "Done"}
-		// io.emit("update_" + id, obj);
-		// res.sendStatus(204);
-	// }
-// });
-
-
-//setTimeout(readFromAddConfirmList, 3000, id);
-// function readFromAddConfirmList(id) {
-	// redisClient.lpop("addList", function(err, value) { //addConfirmList
-		// if(value != null) {
-			// var obj = {};
-			// obj[value] = {status: "Done"}
-			// io.emit("update_" + id, obj);
-			// readFromAddConfirmList(id);
-		// }
-	// });
-// }
-
 function initFromLogoStateStore(id) {
 	redisClient.hgetall("logoStateStore", function(err, value) {		
 		var data = {};
@@ -163,9 +104,26 @@ function initFromLogoStateStore(id) {
 		}
 		io.emit("add_" + id, data);
 		
-		//TODO timing issue... emit maybe slow (due to server or client or network, async nature of emit)
-		
 		readStormReply(id);
+	});
+	redisClient.hgetall("logoURLStore", function(err, value) {
+		for(var i in value) {			
+			var data = {
+				name: i,
+				url: value[i]
+			};
+			cachedLogoUrlSettings[data.name] = data.url;
+			
+			console.log(cachedLogoUrlSettings);
+			
+			io.emit("updateUrlReply", data);
+		}
+	});
+	redisClient.hgetall("settingsStateStore", function(err, value) {
+		for(var i in value) {
+			var json = JSON.parse(value[i]);
+			io.emit("settingsReply_" + id, json);
+		}		
 	});
 }
 
@@ -175,7 +133,8 @@ function readStormReply(id) {
 			var json = JSON.parse(value);
 			
 			if(json.command.startsWith("set")) {
-				// Update logo state (logoStateStore)
+				// Update settings state (settingsStateStore)
+				redisClient.hset("settingsStateStore", json.command, value);
 				io.emit("settingsReply_" + id, json);
 			}
 			else {
@@ -218,7 +177,15 @@ function readStormReply(id) {
 }
 
 var resultRectsCounter = 0.0;
-var framePeriod = 2; // = 1 / fps
+var framePeriod = 1 / 25;
+var hasStarted = false;
+function handleRegisterResultsVideo() {
+	if(!hasStarted) {
+		hasStarted = true;
+		setTimeout(readResultRects, 0);
+	}
+}
+
 function readResultRects() {
 	redisClient.lpop("resultRects", function(err, value) {
 		if(value != null) {
@@ -227,8 +194,10 @@ function readResultRects() {
 			for(var i = 0; i < json.length; i++) {
 				json[i].startTime = resultRectsCounter;
 				json[i].endTime = resultRectsCounter + framePeriod;
-				json[i].url = "http://www.google.com";
+				json[i].url = cachedLogoUrlSettings[json[i].name] || "#";
 			}
+			
+			//console.log("Result Rectangles", cachedLogoUrlSettings);
 			
 			io.emit("addResultRects", json);
 			
@@ -259,6 +228,12 @@ function handleSettingsRequest(data) {
 	redisClient.rpush("nodeToStorm", JSON.stringify(data));
 }
 
+function handleUpdateUrlRequest(data) {
+	redisClient.hset("logoURLStore", data.name, data.url);
+	cachedLogoUrlSettings[data.name] = data.url;
+	io.emit("updateUrlReply", data);
+}
+
 function uniqueNameGenerator(path, filename) {
 	var lastDotPosition = filename.lastIndexOf(".");
 	var extension = "";
@@ -283,3 +258,72 @@ function searchForId(rawId) {
 		return id;
 	return null;
 }
+
+
+
+
+// app.get('/loadDefaultLogos/:id', function(req, res) {
+	// var id = searchForId(req.params.id);
+	// if(id == null) {
+		// res.sendStatus(404);
+	// }
+	// else {		
+		// fs.readdir(__dirname + "/default_logos/", function(err, files) {
+			// var data = {};
+			// var redisMultiCommand = redisClient.multi();
+			// if(files) {
+				// for(var i = 0; i < files.length; i++) {
+					// var newName = uniqueNameGenerator(__dirname + "/session_files/" + id + "/logo_images/", files[i]);
+					
+					// fs.copySync(
+						// __dirname + "/default_logos/" + files[i],
+						// __dirname + "/session_files/" + id + "/logo_images/" + newName
+					// );
+					
+					// data[newName] = {
+						// url: "/session_files/" + id + "/logo_images/" + newName,
+						// status: "Loading"
+					// }
+					
+					// var json = {
+						// command: "add",
+						// name: newName,
+					// }
+					
+					// redisMultiCommand.rpush("nodeToStorm", JSON.stringify(json));	
+				// }
+			// }
+			// res.json(data);
+			// redisMultiCommand.exec();
+		// });
+	// }
+// });
+
+// ===== Routes for Storm =====
+
+// app.post('/confirmAdd/:id/:logoId', function (req, res) {
+	// var id = searchForId(req.params.id);
+	// if(id == null) {
+		// res.sendStatus(404);
+	// }
+	// else {
+		// var logoName = req.params.logoId;
+		// var obj = {};
+		// obj[logoName] = {status: "Done"}
+		// io.emit("update_" + id, obj);
+		// res.sendStatus(204);
+	// }
+// });
+
+
+//setTimeout(readFromAddConfirmList, 3000, id);
+// function readFromAddConfirmList(id) {
+	// redisClient.lpop("addList", function(err, value) { //addConfirmList
+		// if(value != null) {
+			// var obj = {};
+			// obj[value] = {status: "Done"}
+			// io.emit("update_" + id, obj);
+			// readFromAddConfirmList(id);
+		// }
+	// });
+// }
